@@ -1,0 +1,50 @@
+#
+# backup gerrit directories
+# backup every day, keep 14 latest backups
+#
+{{- if .Values.enableBackup }}
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-backup
+spec:
+  schedule: "0 23 * * *"
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+             {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumes:
+            {{ range $vol := .Values.persistence.volumes }}
+            - name: gerrit-data-{{ $vol.name }}
+              persistentVolumeClaim:
+                claimName: {{ $.Release.Name }}-{{ $vol.name }}
+            {{ end }}
+          containers:
+          - name: gerrit-backup
+            image: bash:5.0.17
+            command:
+              - sh
+              - -exc
+              - |
+                cd /backup
+                tar --directory /data -czf gerrit-$(date +%Y.%m.%d-%s).tar.gz .
+                find /backup -type f -mtime +14 -delete
+
+            volumeMounts:
+              {{ range $vol := .Values.persistence.volumes }}
+              {{- if ne .name "backup" }}
+              - mountPath: /data/{{ $vol.name }}
+                name: gerrit-data-{{ $vol.name }}
+              {{- else }}
+              - name: gerrit-data-{{ $vol.name }}
+                mountPath: /backup
+              {{- end }}
+              {{- end }}
+{{- end }}

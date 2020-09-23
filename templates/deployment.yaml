@@ -1,0 +1,118 @@
+{{- $volumes := .Values.persistence.volumes }}
+{{- $releaseName := .Release.Name }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gerrit.fullname" . }}
+  labels:
+    {{- include "gerrit.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    rollingUpdate: null
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "gerrit.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gerrit.selectorLabels" . | nindent 8 }}
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      serviceAccountName: {{ include "gerrit.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: fix-volume-permissions
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext:
+            runAsUser: 0
+          command:
+            - 'sh'
+            - '-c'
+            - |
+              chown -R 1000:1000 /tmp/gerrit/
+              if [ "$(ls -A /tmp/gerrit/git)" ]; then
+                echo "Git directory already initialized"
+              else
+                echo "Initializing directories, copy docker volumes content"
+                {{- range $volumes }}
+                if [ -d  "/var/gerrit/{{ .name }}" ]; then
+                  cp -a /var/gerrit/{{ .name }}/* /tmp/gerrit/{{ .name }}/
+                fi
+                {{- end }}
+              fi
+              install -o 1000 -g 1000 /tmp/gerrit.config /tmp/gerrit/etc/gerrit.config
+          volumeMounts:
+            - name: gerrit-config
+              mountPath: /tmp/
+          {{- range $volumes }}
+            - name: gerrit-{{ .name }}
+              mountPath: /tmp/gerrit/{{ .name }}
+          {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: ssh
+              containerPort: 29418
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          volumeMounts:
+          {{- range $volumes }}
+          {{- if ne .name "backup" }}
+          - name: gerrit-{{ .name }}
+            mountPath: /var/gerrit/{{ .name }}
+          {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+      - name: gerrit-config
+        secret:
+          secretName: {{ $releaseName }}-config
+      {{- range $volumes }}
+      - name: gerrit-{{ .name }}
+        persistentVolumeClaim:
+              claimName: {{ $releaseName }}-{{ .name }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}

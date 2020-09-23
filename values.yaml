@@ -1,0 +1,199 @@
+replicaCount: 1
+
+image:
+  repository: nx/gerrit
+  tag: 2.16.22
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+persistence:
+  enabled: true
+  storageClass: "local-storage"
+  volumesBasePath: "/srv"
+  volumes:
+  - name: backup
+    size: 4Gi
+    fullHostPath: /mnt/infra/gerrit-backup
+  - name: cache
+    size: 4Gi
+  - name: db
+    size: 4Gi
+  - name: etc
+    size: 4Gi
+  - name: git
+    size: 4Gi
+  - name: index
+    size: 4Gi
+
+enableBackup: true
+
+gerrit:
+  server_id:
+  canonical_web_url: http://gerrit.local
+  all_admins: true
+  smtp:
+    server:
+    user:
+    password:
+  oauth:
+    client_id:
+    client_secret:
+    domain:
+  jira:
+    url:
+    user:
+    password:
+  cowardUser: Jenkins
+  config: |
+      [gerrit]
+        basePath = git
+        serverId = {{ .Values.gerrit.server_id }}
+        canonicalWebUrl = {{ .Values.gerrit.canonical_web_url }}
+      [database]
+        type = h2
+        database = /var/gerrit/db/ReviewDB
+      [index]
+        type = LUCENE
+      [auth]
+        {{- if .Values.gerrit.all_admins }}
+        type = DEVELOPMENT_BECOME_ANY_ACCOUNT
+        {{ else }}
+        type = OAUTH
+        gitBasicAuthPolicy = HTTP
+        {{- end }}
+      [receive]
+        enableSignedPush = false
+      {{- if .Values.gerrit.smtp.server }}
+      [sendemail]
+        smtpServer = {{ .Values.gerrit.smtp.server }}
+        enable = true
+        smtpServerPort = 587
+        smtpEncryption = tls
+        smtpUser = {{ .Values.gerrit.smtp.user }}
+        smtpPass = {{ .Values.gerrit.smtp.password }}
+        from = ${user} (Code Review) <{{ .Values.gerrit.smtp.user }}>
+      {{- end }}
+      [container]
+        user = gerrit
+        javaOptions = "-Dflogger.backend_factory=com.google.common.flogger.backend.log4j.Log4jBackendFactory#getInstance"
+        javaOptions = "-Dflogger.logging_context=com.google.gerrit.server.logging.LoggingContext#getInstance"
+      [sshd]
+        listenAddress = *:29418
+        advertisedAddress = *:22
+      [httpd]
+        listenUrl = proxy-http://*:8080/
+        filterClass = com.googlesource.gerrit.plugins.ootb.FirstTimeRedirect
+        firstTimeRedirectUrl = /login/%23%2F?account_id=1000000
+      [cache]
+        directory = cache
+      [cache "web_sessions"]
+        maxAge = 14d
+      {{- if .Values.gerrit.oauth.client_id }}
+      [plugin "gerrit-oauth-provider-google-oauth"]
+        fix-legacy-user-id = false
+        domain = {{ .Values.gerrit.oauth.domain }}
+        client-id = {{ .Values.gerrit.oauth.client_id }}
+        client-secret = {{ .Values.gerrit.oauth.client_secret }}
+      {{- end }}
+      [plugins]
+        allowRemoteAdmin = true
+      [plugin "events-log"]
+        storeUrl = jdbc:h2:/var/gerrit/db/ChangeEvents
+      [gitweb]
+        type = gitiles
+      [download]
+        scheme = ssh
+        scheme = anon_http
+      [user]
+        anonymousCoward = {{ .Values.gerrit.cowardUser }}
+      {{- if .Values.gerrit.jira.url }}
+      [its-jira]
+        url = {{ .Values.gerrit.jira.url }}
+        username = {{ .Values.gerrit.jira.user }}
+        password = {{ .Values.gerrit.jira.password }}
+      {{- end }}
+      [commitmessage]
+        maxSubjectLength = 99
+        maxLineLength = 99
+        longLinesThreshold = 10
+        rejectTooLong = true
+      [noteDb "changes"]
+        autoMigrate = false
+        trial = false
+        write = true
+        read = true
+        sequence = true
+        primaryStorage = note db
+        disableReviewDb = true
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: gerrit-nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: gerrit.local
+      paths:
+        - /
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+nginx-ingress:
+  controller:
+    ingressClass: gerrit-nginx
+    service:
+      externalTrafficPolicy: Local
+    publishService:
+      enabled: true
+  tcp:
+    22: "{{ .Release.Namespace }}/{{ .Release.Name }}:22"
+  defaultBackend:
+    enabled: false
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+nodeSelector: {}
+#  gerrit-test: deploy
+
+tolerations: []
+
+affinity: {}

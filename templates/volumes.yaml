@@ -1,0 +1,43 @@
+{{- $releaseName := .Release.Name -}}
+{{- $storageClass := .Values.persistence.storageClass -}}
+{{- $volumesBasePath := .Values.persistence.volumesBasePath -}}
+
+{{ range .Values.persistence.volumes }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ $releaseName }}-{{ .name }}
+  labels:
+    owner: {{ $releaseName }}-{{ .name }}
+spec:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: {{ .size }}
+  storageClassName: {{ $storageClass }}
+  hostPath:
+  {{- if .fullHostPath }}
+    path: {{ .fullHostPath }}
+  {{- else }}
+    path: {{ $volumesBasePath }}/{{ $releaseName }}/{{ .name }}
+  {{- end }}
+    type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $releaseName }}-{{ .name }}
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .size }}
+  storageClassName: {{ $storageClass }}
+  selector:
+    matchLabels:
+      owner: {{ $releaseName }}-{{ .name }}
+{{ end }}
+
