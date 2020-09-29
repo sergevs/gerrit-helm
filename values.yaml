@@ -16,7 +16,7 @@ persistence:
   volumes:
   - name: backup
     size: 4Gi
-    fullHostPath: /mnt/infra/gerrit-backup
+    fullHostPath: /mnt/infra/backups/gerrit
   - name: cache
     size: 4Gi
   - name: db
